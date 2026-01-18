@@ -7,7 +7,6 @@ from typing import List, Dict, Tuple
 import json
 import os
 
-
 @dataclass
 class DCDevice:
     """Represents devices on a single DC line"""
@@ -63,6 +62,37 @@ class KantechDCCalculator:
             {'name': 'in16', 'inputs': 16, 'outputs': 0, 'cost': 470},
             {'name': 'r8', 'inputs': 0, 'outputs': 8, 'cost': 470}
         ]
+        
+        # License information - UPDATED with correct logic
+        self.license_info = {
+            'special': {
+                'name': 'Kantech Special License',
+                'max_controllers': 32,
+                'description': 'For systems with 32 or fewer controllers (non-redundant)',
+                'cost': 0  # License cost included in controller cost
+            },
+            'corporate': {
+                'name': 'Kantech Corporate License',
+                'min_controllers': 33,
+                'description': 'For systems with more than 32 controllers (non-redundant)',
+                'cost': 0  # License cost included in controller cost
+            },
+            'global': {
+                'name': 'Global License',
+                'description': 'Required for ANY redundancy configuration (replaces Special/Corporate)',
+                'cost': 0  # Base license cost
+            },
+            'gateway': {
+                'name': 'Gateway License',
+                'description': 'Required for gateway/server communication in redundant systems',
+                'cost': 500  # Example cost
+            },
+            'redundancy': {
+                'name': 'Redundancy License',
+                'description': 'Additional license for failover/redundancy capability',
+                'cost': 750  # Example cost
+            }
+        }
     
     def clear_screen(self):
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -324,6 +354,145 @@ class KantechDCCalculator:
         
         return best_solution
     
+    def calculate_total_controllers(self):
+        """Calculate total number of controllers needed for ALL DC lines"""
+        if not self.dc_lines:
+            return {'total_controllers': 0, 'kt-400': 0, 'kt-2': 0, 'kt-1': 0}
+        
+        total_kt400 = 0
+        total_kt2 = 0
+        total_kt1 = 0
+        
+        for dc_line in self.dc_lines:
+            dc_totals = dc_line.calculate_totals()
+            controller_info = self.select_controllers_for_dc(dc_totals)
+            
+            if controller_info:
+                total_kt400 += controller_info['kt-400']
+                total_kt2 += controller_info['kt-2']
+                total_kt1 += controller_info['kt-1']
+        
+        total_controllers = total_kt400 + total_kt2 + total_kt1
+        
+        return {
+            'total_controllers': total_controllers,
+            'kt-400': total_kt400,
+            'kt-2': total_kt2,
+            'kt-1': total_kt1,
+            'breakdown': f"kt-400: {total_kt400}, kt-2: {total_kt2}, kt-1: {total_kt1}"
+        }
+    
+    def calculate_license_requirements(self, use_redundancy=False):
+        """Calculate license requirements based on total controllers"""
+        self.clear_screen()
+        self.print_header("LICENSE CALCULATION")
+        
+        # Calculate total controllers
+        controller_totals = self.calculate_total_controllers()
+        total_controllers = controller_totals['total_controllers']
+        
+        print("📊 CONTROLLER SUMMARY:")
+        print("-" * 40)
+        print(f"Total Controllers Needed: {total_controllers}")
+        print(f"Controller Breakdown:")
+        print(f"  kt-400: {controller_totals['kt-400']} units")
+        print(f"  kt-2:   {controller_totals['kt-2']} units")
+        print(f"  kt-1:   {controller_totals['kt-1']} units")
+        print()
+        
+        print("🎫 LICENSE REQUIREMENTS:")
+        print("-" * 40)
+        
+        # Determine license type based on controller count
+        if total_controllers == 0:
+            print("❌ No controllers configured!")
+            print("Please add DC lines and calculate controllers first.")
+            input("\nPress Enter to continue...")
+            return
+        
+        # UPDATED LOGIC: When redundancy is needed, ALWAYS use Global License
+        if use_redundancy:
+            print(f"🔴 REDUNDANCY CONFIGURATION SELECTED")
+            print(f"✅ Required License: {self.license_info['global']['name']}")
+            print(f"   Reason: Redundancy requires Global License (replaces Special/Corporate)")
+            print(f"   Description: {self.license_info['global']['description']}")
+            
+            # Additional licenses for redundancy configuration
+            print(f"\n➕ ADDITIONAL LICENSES FOR REDUNDANCY:")
+            print(f"   1. {self.license_info['gateway']['name']}")
+            print(f"      Cost: ${self.license_info['gateway']['cost']}")
+            print(f"      Description: {self.license_info['gateway']['description']}")
+            
+            print(f"\n   2. {self.license_info['redundancy']['name']}")
+            print(f"      Cost: ${self.license_info['redundancy']['cost']}")
+            print(f"      Description: {self.license_info['redundancy']['description']}")
+            
+            license_type = 'global'
+            additional_licenses = [
+                {'name': self.license_info['gateway']['name'], 'cost': self.license_info['gateway']['cost']},
+                {'name': self.license_info['redundancy']['name'], 'cost': self.license_info['redundancy']['cost']}
+            ]
+            
+        else:
+            # Non-redundant configuration
+            if total_controllers <= 32:
+                license_type = 'special'
+                print(f"✅ Required License: {self.license_info['special']['name']}")
+                print(f"   Reason: {total_controllers} controllers ≤ 32")
+                print(f"   Description: {self.license_info['special']['description']}")
+            else:
+                license_type = 'corporate'
+                print(f"✅ Required License: {self.license_info['corporate']['name']}")
+                print(f"   Reason: {total_controllers} controllers > 32")
+                print(f"   Description: {self.license_info['corporate']['description']}")
+            
+            additional_licenses = []
+        
+        # Calculate total license cost
+        total_license_cost = 0
+        if use_redundancy:
+            total_license_cost = (self.license_info['gateway']['cost'] + 
+                                 self.license_info['redundancy']['cost'])
+        
+        # Summary
+        print("\n" + "=" * 60)
+        print("📝 LICENSE SUMMARY:")
+        print("-" * 60)
+        print(f"Total Controllers: {total_controllers}")
+        print(f"Configuration: {'Redundant' if use_redundancy else 'Non-Redundant'}")
+        print()
+        
+        if use_redundancy:
+            print(f"PRIMARY LICENSE:")
+            print(f"  • {self.license_info['global']['name']}")
+            print(f"\nADDITIONAL LICENSES:")
+            for license_item in additional_licenses:
+                print(f"  • {license_item['name']}: ${license_item['cost']}")
+            print(f"\nTOTAL LICENSE COST: ${total_license_cost}")
+        else:
+            if total_controllers <= 32:
+                print(f"PRIMARY LICENSE:")
+                print(f"  • {self.license_info['special']['name']}")
+            else:
+                print(f"PRIMARY LICENSE:")
+                print(f"  • {self.license_info['corporate']['name']}")
+            print(f"\nADDITIONAL LICENSES: None")
+            print(f"TOTAL LICENSE COST: $0 (included in controller cost)")
+        
+        print("\n" + "=" * 60)
+        
+        # Store license info for export
+        self.license_result = {
+            'total_controllers': total_controllers,
+            'primary_license': license_type,
+            'use_redundancy': use_redundancy,
+            'additional_licenses': additional_licenses,
+            'total_license_cost': total_license_cost,
+            'controller_breakdown': controller_totals
+        }
+        
+        input("\nPress Enter to continue...")
+    
     def calculate_single_dc_line(self, dc_line: DCDevice):
         """Calculate system for a SINGLE DC line"""
         self.clear_screen()
@@ -470,6 +639,17 @@ class KantechDCCalculator:
         print(f"Total controller cost: ${total_kt400 * 1400 + total_kt2 * 750 + total_kt1 * 450}")
         print(f"Total expansion cost:  ${total_expansion_cost}")
         print(f"GRAND TOTAL:           ${grand_total_cost}")
+        
+        # Calculate total controllers for license reference
+        total_controllers = total_kt400 + total_kt2 + total_kt1
+        print(f"\n🎫 LICENSE REFERENCE:")
+        print("-" * 40)
+        if total_controllers <= 32:
+            print(f"Total Controllers: {total_controllers} → Kantech Special License")
+            print(f"Note: For redundancy, migrate to Global License + Gateway + Redundancy licenses")
+        else:
+            print(f"Total Controllers: {total_controllers} → Kantech Corporate License")
+            print(f"Note: For redundancy, migrate to Global License + Gateway + Redundancy licenses")
         
         # Store all results for export
         self.all_results = all_results
@@ -671,6 +851,81 @@ class KantechDCCalculator:
                 'Total_Cost': ''
             })
         
+        # Add license information if available
+        if hasattr(self, 'license_result'):
+            license_info = self.license_result
+            
+            # Primary license info
+            if license_info['use_redundancy']:
+                primary_license_name = self.license_info['global']['name']
+            elif license_info['total_controllers'] <= 32:
+                primary_license_name = self.license_info['special']['name']
+            else:
+                primary_license_name = self.license_info['corporate']['name']
+            
+            data.append({
+                'DC_Line': 'LICENSE INFO',
+                'Type': 'System Configuration',
+                'Readers': f"{'Redundant' if license_info['use_redundancy'] else 'Non-Redundant'}",
+                'Inputs': f"Total Controllers: {license_info['total_controllers']}",
+                'Outputs': '',
+                'KT400': '',
+                'KT2': '',
+                'KT1': '',
+                'Controller_Cost': '',
+                'Expansion_Modules': '',
+                'Expansion_Cost': '',
+                'Total_Cost': ''
+            })
+            
+            data.append({
+                'DC_Line': 'LICENSE INFO',
+                'Type': 'Primary License',
+                'Readers': primary_license_name,
+                'Inputs': '',
+                'Outputs': '',
+                'KT400': '',
+                'KT2': '',
+                'KT1': '',
+                'Controller_Cost': '',
+                'Expansion_Modules': '',
+                'Expansion_Cost': '',
+                'Total_Cost': ''
+            })
+            
+            # Additional licenses if redundancy
+            if license_info['use_redundancy']:
+                for license_item in license_info['additional_licenses']:
+                    data.append({
+                        'DC_Line': 'LICENSE INFO',
+                        'Type': 'Additional License',
+                        'Readers': license_item['name'],
+                        'Inputs': f"Cost: ${license_item['cost']}",
+                        'Outputs': '',
+                        'KT400': '',
+                        'KT2': '',
+                        'KT1': '',
+                        'Controller_Cost': '',
+                        'Expansion_Modules': '',
+                        'Expansion_Cost': '',
+                        'Total_Cost': ''
+                    })
+                
+                data.append({
+                    'DC_Line': 'LICENSE INFO',
+                    'Type': 'Total License Cost',
+                    'Readers': f"${license_info['total_license_cost']}",
+                    'Inputs': '',
+                    'Outputs': '',
+                    'KT400': '',
+                    'KT2': '',
+                    'KT1': '',
+                    'Controller_Cost': '',
+                    'Expansion_Modules': '',
+                    'Expansion_Cost': '',
+                    'Total_Cost': ''
+                })
+        
         # Add grand total
         total_kt400 = sum(r['controllers']['kt-400'] for r in self.all_results)
         total_kt2 = sum(r['controllers']['kt-2'] for r in self.all_results)
@@ -709,6 +964,10 @@ class KantechDCCalculator:
             print("1. Each DC line calculated INDIVIDUALLY")
             print("2. Controllers selected based on DC line's reader count ONLY")
             print("3. Expansion modules added for DC line's I/O requirements")
+            print("4. License Rules:")
+            print("   - ≤ 32 controllers: Special License")
+            print("   - > 32 controllers: Corporate License")
+            print("   - Redundancy: Global License + Gateway + Redundancy licenses")
             print()
             
             if self.dc_lines:
@@ -720,6 +979,20 @@ class KantechDCCalculator:
                 total_inputs = sum(dc.calculate_totals()['inputs'] for dc in self.dc_lines)
                 total_outputs = sum(dc.calculate_totals()['outputs'] for dc in self.dc_lines)
                 print(f"Total Requirements: {total_readers} readers, {total_inputs} inputs, {total_outputs} outputs")
+                
+                # Show total controllers if calculated
+                if hasattr(self, 'all_results'):
+                    total_controllers = sum(r['controllers']['kt-400'] + r['controllers']['kt-2'] + r['controllers']['kt-1'] 
+                                          for r in self.all_results)
+                    print(f"Total Controllers: {total_controllers}")
+                    
+                    # Show license recommendation
+                    if hasattr(self, 'license_result') and self.license_result['use_redundancy']:
+                        print(f"License: Global License + Gateway + Redundancy (Redundant System)")
+                    elif total_controllers <= 32:
+                        print(f"License: Kantech Special License")
+                    else:
+                        print(f"License: Kantech Corporate License")
             else:
                 print("No DC lines configured yet")
             print()
@@ -730,15 +1003,16 @@ class KantechDCCalculator:
             print("3. View DC Lines Summary")
             print("4. Calculate Specific DC Line")
             print("5. Calculate ALL DC Lines")
-            print("6. Export ALL DC Line Results")
-            print("7. Clear All Data")
-            print("8. Exit")
+            print("6. Calculate License Requirements")
+            print("7. Export ALL DC Line Results")
+            print("8. Clear All Data")
+            print("9. Exit")
             print()
             
             try:
-                choice = int(input("Select option (1-8): "))
+                choice = int(input("Select option (1-9): "))
             except ValueError:
-                print("Enter a number 1-8")
+                print("Enter a number 1-9")
                 input("Press Enter to continue...")
                 continue
             
@@ -753,22 +1027,65 @@ class KantechDCCalculator:
             elif choice == 5:
                 self.calculate_all_dc_lines()
             elif choice == 6:
-                self.export_all_results_to_csv()
+                self.calculate_license_menu()
             elif choice == 7:
+                self.export_all_results_to_csv()
+            elif choice == 8:
                 self.dc_lines.clear()
                 print("All DC line data cleared!")
                 input("Press Enter to continue...")
-            elif choice == 8:
+            elif choice == 9:
                 print("\nThank you for using Kantech DC Line Calculator!")
                 break
             else:
                 print("Invalid choice!")
                 input("Press Enter to continue...")
+    
+    def calculate_license_menu(self):
+        """Menu for calculating license requirements"""
+        self.clear_screen()
+        self.print_header("CALCULATE LICENSE REQUIREMENTS")
+        
+        print("LICENSE RULES:")
+        print("-" * 40)
+        print("1. NON-REDUNDANT SYSTEMS:")
+        print("   • ≤ 32 controllers → Kantech Special License")
+        print("   • > 32 controllers → Kantech Corporate License")
+        print()
+        print("2. REDUNDANT SYSTEMS:")
+        print("   • Migrate to Global License (replaces Special/Corporate)")
+        print("   • Add Gateway License (for server communication)")
+        print("   • Add Redundancy License (for failover capability)")
+        print()
+        
+        # Ask about redundancy
+        print("Do you need redundancy configuration?")
+        
+        print("(Redundancy provides backup/failover capability)")
+        print()
+        print("1. Yes, I need redundancy (Global + Gateway + Redundancy licenses)")
+        print("2. No, redundancy not needed (Special or Corporate license only)")
+        print()
+        
+        try:
+            redundancy_choice = int(input("Select option (1-2): "))
+            use_redundancy = (redundancy_choice == 1)
+            
+            # Calculate license requirements
+            self.calculate_license_requirements(use_redundancy)
+            
+        except ValueError:
+            print("Invalid input! Please enter 1 or 2.")
+            input("Press Enter to continue...")
 
 def main():
     """Run the calculator"""
     print("Loading Kantech DC Line Calculator...")
     print("Each DC line calculated INDIVIDUALLY")
+    print("License Rules:")
+    print("- ≤ 32 controllers: Special License")
+    print("- > 32 controllers: Corporate License")
+    print("- Redundancy: Global License + Gateway + Redundancy licenses")
     input("Press Enter to start...")
     
     calculator = KantechDCCalculator()
